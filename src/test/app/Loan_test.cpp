@@ -3452,6 +3452,106 @@ class Loan_test : public beast::unit_test::suite
     }
 
     void
+    testLoanPayBrokerFreezeBypass()
+    {
+        testcase("LoanPay broker freeze bypass");
+        using namespace jtx;
+        using namespace loan;
+
+        Account const issuer{"issuer"};
+        Account const lender{"lender"};
+        Account const borrower{"borrower"};
+
+        Env env(*this, all);
+        env.fund(XRP(1'000'000), issuer, lender, borrower);
+        env.close();
+
+        PrettyAsset const asset = issuer[iouCurrency];
+        env(trust(lender, asset(10'000'000)));
+        env(trust(borrower, asset(10'000'000)));
+        env.close();
+
+        env(pay(issuer, lender, asset(10'000'000)));
+        env(pay(issuer, borrower, asset(1'000)));
+        env.close();
+
+        BrokerInfo broker{createVaultAndBroker(env, asset, lender)};
+        auto const baseFee = env.current()->fees().base;
+        Number const principalRequest = asset(200).value();
+
+        auto createJson = env.json(
+            set(borrower, broker.brokerID, principalRequest),
+            fee(baseFee * 2),
+            json(sfCounterpartySignature, Json::objectValue));
+
+        createJson["ClosePaymentFee"] = "0";
+        createJson["GracePeriod"] = 0;
+        createJson["InterestRate"] = 0;
+        createJson["LateInterestRate"] = 0;
+        createJson["LatePaymentFee"] = "0";
+        createJson["LoanOriginationFee"] = "0";
+        createJson["LoanServiceFee"] = "5";
+        createJson["PaymentInterval"] = 60;
+        createJson["PaymentTotal"] = 3;
+
+        createJson = env.json(createJson, sig(sfCounterpartySignature, lender));
+        env(createJson, ter(tesSUCCESS));
+        env.close();
+
+        auto const loanKeylet = keylet::loan(broker.brokerID, 1);
+
+        env(trust(issuer, asset(0), lender, tfSetFreeze));
+        env.close();
+
+        auto const loanSle = env.le(loanKeylet);
+        if (!BEAST_EXPECT(loanSle))
+            return;
+
+        auto const periodicPayment = loanSle->at(sfPeriodicPayment);
+        auto const serviceFee = loanSle->at(sfLoanServiceFee);
+        BEAST_EXPECT(periodicPayment > beast::zero);
+        BEAST_EXPECT(serviceFee > beast::zero);
+
+        auto brokerSle = env.le(keylet::loanbroker(broker.brokerID));
+        if (!BEAST_EXPECT(brokerSle))
+            return;
+
+        auto const coverBefore = brokerSle->at(sfCoverAvailable);
+        auto const ownerBalanceBefore = env.balance(lender, asset).number();
+
+        if (BEAST_EXPECT(broker.asset.raw().holds<Issue>()))
+        {
+            Issue const& issue = broker.asset.raw().get<Issue>();
+            auto const lineKey =
+                keylet::line(lender.id(), issue.account, issue.currency);
+            if (auto const lineSle = env.le(lineKey); BEAST_EXPECT(lineSle))
+            {
+                auto const freezeFlag =
+                    issue.account > lender.id() ? lsfHighFreeze : lsfLowFreeze;
+                BEAST_EXPECT(lineSle->getFieldU32(sfFlags) & freezeFlag);
+            }
+        }
+
+        STAmount const paymentAmount{
+            broker.asset, periodicPayment + serviceFee};
+
+        env(pay(borrower, loanKeylet.key, paymentAmount),
+            fee(baseFee * 5),
+            ter(tesSUCCESS));
+        env.close();
+
+        auto const ownerBalanceAfter = env.balance(lender, asset).number();
+        BEAST_EXPECT(ownerBalanceAfter > ownerBalanceBefore);
+
+        brokerSle = env.le(keylet::loanbroker(broker.brokerID));
+        if (!BEAST_EXPECT(brokerSle))
+            return;
+
+        auto const coverAfter = brokerSle->at(sfCoverAvailable);
+        BEAST_EXPECT(coverAfter == coverBefore);
+    }
+
+    void
     testBasicMath()
     {
         // Test the functions defined in LendingHelpers.h
@@ -4493,6 +4593,7 @@ public:
         testLoanSet();
         testLifecycle();
         testServiceFeeOnBrokerDeepFreeze();
+        testLoanPayBrokerFreezeBypass();
 
         testRPC();
         testBasicMath();
