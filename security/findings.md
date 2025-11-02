@@ -41,3 +41,14 @@
 **Issue.** To protect lenders, broker fees should be diverted into cover whenever `CoverAvailable < DebtTotal * CoverRateMinimum`, exactly the precision-sensitive invariant the threat model warns about.【F:docs/threat-model.md†L42-L45】 The routing logic compares the available cover against a `roundToAsset` result that uses the default “round to nearest” mode.【F:src/xrpld/app/tx/detail/LoanPay.cpp†L258-L289】【F:include/xrpl/protocol/STAmount.h†L739-L748】【F:src/libxrpl/basics/Number.cpp†L33-L46】 If the true minimum sits just above a representable quantum, the comparison sees the rounded-down value and concludes the broker is fully collateralized. The fee is then paid out to the owner and cover is never topped up, leaving the broker under the mandated floor while extracting fees.【F:src/xrpld/app/tx/detail/LoanPay.cpp†L426-L433】 No later invariant restores the missing cover, so the broker can repeatedly exploit fractional deficiencies to siphon funds.
 
 **Remediation.** Compute the minimum with an explicit upward guard (or compare against an upward-rounded `tenthBipsOfValue`) so the fee is withheld whenever the true requirement is not met.
+
+## 7. Coverage status for remaining priority areas
+
+The remaining threat-model priorities have been reviewed without yielding additional exploitable paths:
+
+* **Interest accrual and periodic payments.** The lending helpers force periodic payments to round upward, preventing borrowers from under-paying interest or principal through rounding drift.【F:src/xrpld/app/misc/LendingHelpers.h†L37-L45】
+* **Dependency gating.** Every lending transaction reuses `checkLendingProtocolDependencies`, which enforces Single Asset Vault activation and extra feature checks before any lending amendment logic runs.【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L26-L31】
+* **Vault withdrawals and clawbacks.** Withdrawals require authorization, issuer freeze checks, and precise share-to-asset conversions; clawbacks clamp redemption to available assets and truncate shares to avoid exceeding vault balances.【F:src/xrpld/app/tx/detail/VaultWithdraw.cpp†L63-L214】【F:src/xrpld/app/tx/detail/VaultClawback.cpp†L160-L320】
+* **Invariant enforcement.** The post-transaction invariant set tracks broker directories, monotonic loan sequences, and non-negative debt/cover fields so corrupted state is rejected during consensus replay.【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2359-L2450】
+
+No other deviations from the threat model’s safeguards surfaced in these areas after line-by-line inspection.
