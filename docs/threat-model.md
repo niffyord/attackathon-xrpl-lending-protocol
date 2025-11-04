@@ -1,48 +1,140 @@
-# XRPL Lending Protocol Threat Model
+## XRPL Lending Protocol Threat Model (XLS-66)
 
-## 1. Scope and Context
+### Scope and Sources
 
-This threat model covers the lending functionality added to the `rippled` server for the XRPL Attackathon. The analysis focuses on the on-ledger lending lifecycle (brokers, loans, vaults, liquidation helpers) and the supporting transaction processing stack that executes XRP Ledger transactions. The XRP Ledger is operated by a decentralized set of peer-to-peer nodes, with consensus used to confirm transactions without a central operator.【F:README.md†L3-L30】 The `rippled` server exposes command-line and RPC interfaces for administrators and clients, expanding the attack surface to include remote method invocation and operational tooling.【F:src/xrpld/app/main/Main.cpp†L125-L188】
+- In-scope code: core `rippled` lending protocol and dependencies in this repository: `src/xrpld/app/tx/detail/*Loan*`, `src/xrpld/app/misc/*Lending*`, `src/libxrpl/ledger/*`, `include/xrpl/protocol/**/*` (including `detail/*.macro`).
+- Program docs: `docs/ATTACKATHON.md` (lines 1–75) and repo `README.md` (lines 1–72) for objectives and constraints.
 
-The lending protocol is only enabled when the Single Asset Vault (SAV) amendment is active, creating a dependency chain that must be respected in all threat considerations.【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L26-L31】 Security objectives for this codebase include preserving ledger integrity, preventing unauthorized fund movement, protecting lender and borrower accounting, and ensuring compliance controls tied to vault withdrawals and pseudo-accounts.
+### Security Objectives
 
-## 2. System Overview
+- Protect lender funds and borrower repayments; no unauthorized value creation, destruction, or transfer.
+- Enforce vault First Loss Capital (FLC) coverage and fair liquidation semantics.
+- Ensure interest, fees, and rounding are consistent and resistant to manipulation across scales.
+- Honor issuer/account freeze and deep-freeze semantics and permitted clawback policy.
+- Maintain ledger consistency: loan/broker/vault state transitions are atomic and invariant-safe.
+- Prevent privilege abuse by brokers/admins; respect access controls and configuration governance.
 
-`rippled` maintains ledger state through structured ledger objects and transaction processors:
+### Architecture & Trust Boundaries
 
-- **Transaction framework** – The `Transactor` base class enforces signature and authorization policies before calling operation-specific `doApply()` logic. Pseudo accounts, which represent objects such as vaults, are barred from signing transactions when the lending protocol is enabled, preventing direct manipulation of lending entities via standard account keys.【F:src/xrpld/app/tx/detail/Transactor.cpp†L674-L721】
-- **Pseudo account management** – Ledger helper routines create pseudo accounts with restricted capabilities (no master key, deposit authorization enforced) for features like vaults, linking them to owner objects and ensuring predictable sequence handling under the lending and SAV amendments.【F:src/libxrpl/ledger/View.cpp†L1260-L1303】
-- **Loan computation utilities** – `LendingHelpers` define the data model for loan payments, properties, and state tracking. They provide arithmetic utilities for periodic rate calculation, fee separation, and interest accrual, ensuring consistent rounding behavior for ledger accounting.【F:src/xrpld/app/misc/LendingHelpers.h†L37-L161】【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L57-L191】
-- **Vault operations** – Vault transactions (e.g., `VaultWithdraw`) enforce withdrawal policies, asset authorization, and share-to-asset conversion, integrating compliance checks such as credential validation and frozen asset enforcement before releasing funds.【F:src/xrpld/app/tx/detail/VaultWithdraw.cpp†L33-L191】
-- **Invariant enforcement** – Post-transaction invariant checks validate that loan brokers and loans remain in a consistent state, forbidding negative balances, preventing sequence rollbacks, and ensuring directories for zero-owner brokers remain well formed.【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2359-L2519】
+- Transactions: `Transactor` pipeline per operation: `preflight` (syntax/rules), `preclaim` (state checks), `doApply` (state mutation). Examples: `LoanSet`, `LoanPay`, `LoanManage`, `LoanBroker*`, `Vault*` in `src/xrpld/app/tx/detail/`.
+- Helpers: `LendingHelpers.*` centralize rate/rounding, fee/interest splits, state calculations.
+- Ledger state: `SLE` entries for `Loan`, `LoanBroker`, `Vault`, balances and trust lines.
+- Payments: IOU/MPT transfers via `accountSend`/`accountSendMulti` and `Payment` engine. Freeze and deep-freeze checks occur in step checks and path engine.
+- Protocol surfaces: macros define transactions, fields, flags: `include/xrpl/protocol/detail/{features.macro, transactions.macro, ledger_entries.macro, sfields.macro}`.
+- External boundary: JSON-RPC admission and consensus; only sanctioned devnet/standalone per program rules.
 
-## 3. Assets and Trust Boundaries
+### Protected Assets and Critical Invariants
 
-| Asset / Component | Description | Security Objectives | Relevant Code |
-| --- | --- | --- | --- |
-| Loan Ledger Entries | Track outstanding principal, interest, fees, and payment status for each loan. | Prevent negative balances, ensure overpayment flags mutate only via sanctioned flows, guarantee payment completion sets principal to zero. | `LoanState` structures and invariant checks.【F:src/xrpld/app/misc/LendingHelpers.h†L95-L140】【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2489-L2519】 |
-| Loan Broker Entries | Represent broker-managed positions, cover reserves, and directories. | Maintain monotonically increasing sequence numbers, non-negative debt/cover, and valid directory layouts. | Broker invariant validation.【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2359-L2460】 |
-| Vault Ledger Entries | Hold collateral assets and share issuance for lenders. | Enforce withdrawal policy, asset authorization, share/account freezes, and precise conversion between shares and assets. | `VaultWithdraw` checks and conversions.【F:src/xrpld/app/tx/detail/VaultWithdraw.cpp†L59-L191】 |
-| Pseudo Accounts | System-owned accounts for vaults and similar constructs. | Ensure they cannot initiate transactions or receive unauthorized deposits. | Pseudo-account creation and signature gating.【F:src/libxrpl/ledger/View.cpp†L1260-L1299】【F:src/xrpld/app/tx/detail/Transactor.cpp†L686-L691】 |
-| Transaction Processing Stack | RPC/CLI entry points and ledger execution context. | Require authenticated usage, protect against malformed transaction payloads, and prevent DoS through invalid command usage. | RPC command surface.【F:src/xrpld/app/main/Main.cpp†L125-L188】 |
+- Vault assets and shares: conservation except when explicitly minted/burned per rules; shares track pro-rata claims over vault assets.
+- Loan values: `TotalValueOutstanding = PrincipalOutstanding + InterestOutstanding`; decreases only by valid repayments/default handling.
+- Broker state: `DebtTotal`, `CoverAvailable`, coverage floors derived from configuration (`CoverRateMinimum`, `CoverRateLiquidation`).
+- Rounding/scales: rounding must never understate required coverage or misallocate interest/fees.
+- Compliance: freeze/deep-freeze/clawback flags must be enforced on all value flows (owner and pseudo accounts).
 
-Trust boundaries exist between external clients (RPC/CLI users), peer validators, lending operators (brokers, vault managers), and automated invariant enforcement inside the ledger application. Pseudo accounts and vault share issuances operate under controlled internal policies but interact with user-supplied transactions, making validation layers critical.
+### Primary Attack Surfaces
 
-## 4. Threat Scenarios
+- Loan lifecycle: creation (`LoanSet`), payment (`LoanPay`), impairment/default (`LoanManage`), deletion.
+- Broker cover: deposits/withdrawals (`LoanBrokerCoverDeposit/Withdraw`), fee routing during `LoanPay`.
+- Vault operations: creation, clawback, withdraw; share mint/burn; reward/interest flows.
+- Payment engine interactions: multi-destination (`accountSendMulti`), pathfinding, transfer fees.
+- Rounding and number scale: `Number`, `roundToAsset`, loan/vault scale mismatches.
+- Freeze/deep-freeze/clawback enforcement across owner/pseudo accounts, IOU vs MPT flows.
+- Macro-defined fields and flags: malformed/edge configurations, rule gating (`featureClawback`, etc.).
 
-1. **Unauthorized lending transactions** – Attackers may try to submit transactions as pseudo accounts or bypass dependency checks. The transactor signature gating and amendment dependency checks mitigate this, but testing should cover scenarios where feature gating flags are toggled or misapplied.【F:src/xrpld/app/tx/detail/Transactor.cpp†L686-L691】【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L26-L31】
-2. **Loan accounting manipulation** – Incorrect rounding or interest calculations could skew borrower obligations. Threats include forced overflows, precision loss, or inconsistent rounding between helper functions and transaction logic. The helper utilities enforce upward rounding of periodic payments and provide deterministic breakdowns; fuzzing and unit tests should stress boundary values and large scales.【F:src/xrpld/app/misc/LendingHelpers.h†L37-L161】【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L57-L173】
-3. **Invariant bypass or ledger corruption** – If transactions can bypass invariant checks, negative balances or inconsistent directories may persist, enabling fund misallocation or phantom collateral. Focus testing on transaction sequences that delete brokers, adjust owner counts, or manipulate loan payment states.【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2359-L2519】
-4. **Vault withdrawal abuse** – Malicious users could attempt to withdraw frozen assets, bypass authorization, or exploit share conversion rounding. Investigate edge cases in `VaultWithdraw` for zero-value shares, large share conversions, and credential bypass attempts.【F:src/xrpld/app/tx/detail/VaultWithdraw.cpp†L59-L191】
-5. **Cross-feature interactions** – Lending depends on SAV and MPToken features; mismatched feature activation could expose states where invariants or authorization checks are absent. Validate upgrade/downgrade paths and ensure dependency checks run during amendment transitions.【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L26-L31】【F:src/xrpld/app/misc/LendingHelpers.h†L163-L191】
-6. **Operational attacks via RPC/CLI** – Flooding administrative interfaces with malformed commands or unauthorized usage could degrade service or manipulate ledger state if configuration controls are weak. Harden deployments by restricting RPC exposure and monitoring privileged commands enumerated in the main entrypoint.【F:src/xrpld/app/main/Main.cpp†L125-L188】
+### Threats and Abuse Cases (STRIDE-style)
 
-## 5. Recommended Investigation Areas
+- Spoofing/Privilege
+  - Broker-originated loans bypassing borrower reserve or signature requirements in `LoanSet`.
+  - Misuse of pseudo-accounts to circumvent recipient freeze checks.
+  - Mitigations: `Transactor` prechecks; `requireAuth` for MPT; explicit borrower countersignature path; reserve checks in base `Transactor` and `Payment` engine.
 
-- **Precision and overflow testing** across all `Number` operations used in loan and vault math to ensure ledger state remains canonical even under extreme values.【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L57-L191】
-- **Invariant enforcement robustness**, including scenarios with concurrent amendments, ledger rollbacks, or partial transaction failure, to confirm negative states cannot persist.【F:src/xrpld/app/tx/detail/InvariantCheck.cpp†L2359-L2519】
-- **Authorization and compliance controls** in vault interactions, especially around `requireAuth` and frozen asset checks, to avoid bypasses when destination accounts or shares change mid-transaction.【F:src/xrpld/app/tx/detail/VaultWithdraw.cpp†L109-L191】
-- **Dependency gating** to confirm that lending features cannot activate without SAV prerequisites, and that deactivation safely halts lending transactions without leaving orphaned pseudo accounts.【F:src/xrpld/app/misc/detail/LendingHelpers.cpp†L26-L31】【F:src/libxrpl/ledger/View.cpp†L1283-L1299】
-- **RPC surface hardening** through rate limiting and input validation, acknowledging the broad command set available to remote operators.【F:src/xrpld/app/main/Main.cpp†L125-L188】
+- Tampering with Value Flows
+  - Fee routing on `LoanPay` ignoring issuer freeze on broker owner trust line, sending fees to owner instead of reinforcing cover when frozen.
+  - Cover withdrawal below floor via rounding-down of minimum coverage; FLC siphoning during `LoanBrokerCoverWithdraw`.
+  - Liquidation/default amounts computed with coarse scale, enabling strategic rounding gaps to manipulate who bears losses.
+  - Mitigations to enforce: use freeze checks for both freeze and deep-freeze on owner, compute cover with vault precision and non-downward rounding, centralize floor logic reused by fees/withdraw/default.
 
-This threat model should evolve alongside code changes, new amendments, and audit findings discovered during the Attackathon.
+- Repudiation
+  - Ambiguity in rounding mode across functions; different modes (`to_nearest`, `downward`, implicit STAmount) can cause disputable state deltas.
+  - Mitigation: document and enforce a single rounding policy per invariant; wrap with guards.
+
+- Information Disclosure
+  - Not primary; ledger is public. Ensure no leakage of secrets via RPC logs; keep PII out of on-ledger memo fields.
+
+- Denial of Service (logical)
+  - Transactions that always tec-claim or loop through path engine with constrained assets; large-scale rounding-induced retries.
+  - Mitigations: early `preclaim` gating; avoid invoking path engine when unnecessary (direct sends where possible); cap computational paths.
+
+- Elevation of Privilege
+  - Broker/admin can set parameters causing invariant erosion (e.g., `CoverRateMinimum` to 0, disabling fees or bypassing protections).
+  - Mitigation: parameter bounds in `preflight/preclaim`, rule gates from macros/features, require issuer permissions for clawback.
+
+### Concrete Vulnerability Themes Observed in Code
+
+- Fee routing vs. freeze semantics (high impact)
+  - `LoanPay` computes `sendBrokerFeeToOwner` using coverage floor and only checks deep freeze for owner, not normal freeze. When issuer freeze is set but not deep freeze, fees may still route to owner, bypassing issuer intent.
+  - Relevant files: `src/xrpld/app/tx/detail/LoanPay.cpp` (broker fee routing); freeze utilities in `src/xrpld/app/paths/detail/StepChecks.h` and helpers.
+  - Recommended: apply unified `checkFreeze/checkDeepFrozen` on the exact sender→owner asset flow; on failure, redirect to cover or abort consistently.
+
+- Rounding-driven coverage underflow (critical/high)
+  - Minimum cover and default coverage computed with `roundToAsset(..., loanScale)` can round down when vault precision is higher, enabling cover to drift below true minimum while predicates still pass.
+  - Relevant files: `LoanPay.cpp` (min cover for fee routing), `LoanBrokerCoverWithdraw.cpp` (min cover during withdraw), `LoanManage.cpp` (default coverage), `LendingHelpers.cpp` (scale selection and rounding strategy).
+  - Recommended: compute floors in vault asset precision with upward or to-nearest rounding; centralize floor computation and reuse everywhere.
+
+- Reserve check and borrower validation in broker-originated loans (high)
+  - Ensure `LoanSet` enforces borrower reserve and countersignature across all branches; validate vault pseudo-account freeze status and issuer permissions.
+  - Relevant files: `LoanSet.cpp`, `Transactor.h`, `Payment` usage; freeze checks in `LoanSet.cpp` before value movements.
+
+- Clawback and compliance primitives (medium/high)
+  - `VaultClawback` requires issuer and flags (`lsfAllowTrustLineClawback`, no `lsfNoFreeze`); MPT needs `lsfMPTCanClawback`. Inconsistent enforcement in other flows could reintroduce value to frozen holders indirectly.
+  - Recommended: extend clawback/freeze checks to all intermediate flows (owner↔pseudo, broker↔vault) and forbid configurations that cannot be clawed back (e.g., pseudo-account issuers in vault assets) — already partially present in `VaultCreate`.
+
+- Multi-destination transfers and path engine interactions (medium)
+  - `accountSendMulti` and Payment engine must uniformly enforce freeze/authorization/fee handling for IOU and MPT; divergence can create bypasses.
+  - Recommended: centralize enforcement in ledger layer helpers invoked by all payment paths.
+
+### Controls and Mitigations Present
+
+- Freeze/deep-freeze checks: step checks and transaction code gate sends and receives; deep-freeze and global freeze honored; issuer special-cases.
+- Rule/feature gating: `featureClawback`, other protocol features guard behavior and flags surfaced in RPC.
+- Clawback constraints: only issuer, not XRP, flags required for IOU/MPT; vault creation disallows pseudo-account issuers for clawback-ability.
+- Transactor pipeline: strict `preflight`/`preclaim` before `doApply`; state changes are atomic via `ApplyView`.
+- Rounding helpers: `LendingHelpers` consolidates computations; use of `STAmount` rounding to set loan scale.
+
+### Highest-Priority Risks to Target
+
+1) Coverage floor underflow via rounding (drives fee diversion and unsafe withdraws).
+2) Freeze check gaps on fee routing to owner during `LoanPay`.
+3) Liquidation/default computations using coarse `loanScale` causing unfair outcomes.
+4) Broker-originated `LoanSet` reserve/countersignature edge cases.
+5) Incomplete enforcement of clawback/freeze along owner↔pseudo flows and Payment engine paths.
+
+### Recommended Hardening
+
+- Unify coverage floor computation at vault precision with upward/to-nearest rounding; reuse in fee routing, withdraw, default, and liquidation.
+- Apply `checkFreeze` and `checkDeepFrozen` to all relevant fee/cover flows, including broker owner trust line in `LoanPay`.
+- Validate borrower reserves and countersignatures in all `LoanSet` branches; audit `Transactor` balance assumptions like `mPriorBalance`.
+- Extend negative tests for deep-freeze and clawback across IOU/MPT and pseudo/owner permutations; add invariant checks in tests.
+- Document and enforce rounding policy per computation; add guards preventing zero-effect payments from accumulating rounding drift.
+
+### Testing and PoC Guidance
+
+- Use sanctioned devnet or standalone node (Option B in program docs): submit real transactions via JSON-RPC; demonstrate invariant breaks via `ledger_entry`, `account_lines`.
+- Construct adversarial scales by mixing large and small loans to stress `loanScale` vs vault precision; validate coverage predicates against analytic values.
+- Freeze issuer↔owner trust lines and validate fee routing and cover reinforcement behaviors under `LoanPay`.
+- Exercise `LoanBrokerCoverWithdraw` across the minimum coverage boundary; confirm behavior with path engine vs direct send branches.
+
+### Appendix: Key Files and Components (non-exhaustive)
+
+- Transactions: `src/xrpld/app/tx/detail/LoanSet.cpp`, `LoanPay.cpp`, `LoanManage.cpp`, `LoanBroker{Set,CoverDeposit,CoverWithdraw,Delete}.cpp`, `Vault{Create,Withdraw,Clawback}.cpp`.
+- Helpers: `src/xrpld/app/misc/LendingHelpers.h`, `src/xrpld/app/misc/detail/LendingHelpers.cpp`.
+- Payments: `src/libxrpl/ledger/View.cpp` (`accountSend`, `accountSendMulti`), `src/xrpld/app/tx/detail/Payment.cpp` and step checks `src/xrpld/app/paths/detail/StepChecks.h`.
+- Protocol/macros: `include/xrpl/protocol/detail/{features.macro, transactions.macro, ledger_entries.macro, sfields.macro}`; formats: `TxFormats.h`, `LedgerFormats.h`.
+- Number and rounding: `src/libxrpl/basics/Number.cpp`, `include/xrpl/protocol/STAmount.h`.
+
+### Context Sources
+
+- `docs/ATTACKATHON.md` (lines 1–75): program scope, priorities, testing rules.
+- `README.md` (lines 1–72): XRPL and `rippled` overview and features.
+
+
