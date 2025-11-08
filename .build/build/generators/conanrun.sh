@@ -1,0 +1,1 @@
+. "/workspace/attackathon-xrpl-lending-protocol/.build/build/generators/conanrunenv-release-x86_64.sh"

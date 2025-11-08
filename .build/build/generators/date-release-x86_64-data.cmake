@@ -1,0 +1,49 @@
+########### AGGREGATED COMPONENTS AND DEPENDENCIES FOR THE MULTI CONFIG #####################
+#############################################################################################
+
+set(date_COMPONENT_NAMES "")
+if(DEFINED date_FIND_DEPENDENCY_NAMES)
+  list(APPEND date_FIND_DEPENDENCY_NAMES )
+  list(REMOVE_DUPLICATES date_FIND_DEPENDENCY_NAMES)
+else()
+  set(date_FIND_DEPENDENCY_NAMES )
+endif()
+
+########### VARIABLES #######################################################################
+#############################################################################################
+set(date_PACKAGE_FOLDER_RELEASE "/root/.conan2/p/dated44662e033b4e/p")
+set(date_BUILD_MODULES_PATHS_RELEASE )
+
+
+set(date_INCLUDE_DIRS_RELEASE "${date_PACKAGE_FOLDER_RELEASE}/include")
+set(date_RES_DIRS_RELEASE )
+set(date_DEFINITIONS_RELEASE "-DDATE_HEADER_ONLY")
+set(date_SHARED_LINK_FLAGS_RELEASE )
+set(date_EXE_LINK_FLAGS_RELEASE )
+set(date_OBJECTS_RELEASE )
+set(date_COMPILE_DEFINITIONS_RELEASE "DATE_HEADER_ONLY")
+set(date_COMPILE_OPTIONS_C_RELEASE )
+set(date_COMPILE_OPTIONS_CXX_RELEASE )
+set(date_LIB_DIRS_RELEASE )
+set(date_BIN_DIRS_RELEASE )
+set(date_LIBRARY_TYPE_RELEASE UNKNOWN)
+set(date_IS_HOST_WINDOWS_RELEASE 0)
+set(date_LIBS_RELEASE )
+set(date_SYSTEM_LIBS_RELEASE )
+set(date_FRAMEWORK_DIRS_RELEASE )
+set(date_FRAMEWORKS_RELEASE )
+set(date_BUILD_DIRS_RELEASE )
+set(date_NO_SONAME_MODE_RELEASE FALSE)
+
+
+# COMPOUND VARIABLES
+set(date_COMPILE_OPTIONS_RELEASE
+    "$<$<COMPILE_LANGUAGE:CXX>:${date_COMPILE_OPTIONS_CXX_RELEASE}>"
+    "$<$<COMPILE_LANGUAGE:C>:${date_COMPILE_OPTIONS_C_RELEASE}>")
+set(date_LINKER_FLAGS_RELEASE
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>:${date_SHARED_LINK_FLAGS_RELEASE}>"
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,MODULE_LIBRARY>:${date_SHARED_LINK_FLAGS_RELEASE}>"
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${date_EXE_LINK_FLAGS_RELEASE}>")
+
+
+set(date_COMPONENTS_RELEASE )

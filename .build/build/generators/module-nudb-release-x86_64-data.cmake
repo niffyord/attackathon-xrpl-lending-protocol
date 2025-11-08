@@ -1,0 +1,82 @@
+########### AGGREGATED COMPONENTS AND DEPENDENCIES FOR THE MULTI CONFIG #####################
+#############################################################################################
+
+list(APPEND nudb_COMPONENT_NAMES nudb)
+list(REMOVE_DUPLICATES nudb_COMPONENT_NAMES)
+if(DEFINED nudb_FIND_DEPENDENCY_NAMES)
+  list(APPEND nudb_FIND_DEPENDENCY_NAMES Boost)
+  list(REMOVE_DUPLICATES nudb_FIND_DEPENDENCY_NAMES)
+else()
+  set(nudb_FIND_DEPENDENCY_NAMES Boost)
+endif()
+set(Boost_FIND_MODE "NO_MODULE")
+
+########### VARIABLES #######################################################################
+#############################################################################################
+set(nudb_PACKAGE_FOLDER_RELEASE "/root/.conan2/p/nudbe0c68d1787104/p")
+set(nudb_BUILD_MODULES_PATHS_RELEASE )
+
+
+set(nudb_INCLUDE_DIRS_RELEASE "${nudb_PACKAGE_FOLDER_RELEASE}/include")
+set(nudb_RES_DIRS_RELEASE )
+set(nudb_DEFINITIONS_RELEASE )
+set(nudb_SHARED_LINK_FLAGS_RELEASE )
+set(nudb_EXE_LINK_FLAGS_RELEASE )
+set(nudb_OBJECTS_RELEASE )
+set(nudb_COMPILE_DEFINITIONS_RELEASE )
+set(nudb_COMPILE_OPTIONS_C_RELEASE )
+set(nudb_COMPILE_OPTIONS_CXX_RELEASE )
+set(nudb_LIB_DIRS_RELEASE "${nudb_PACKAGE_FOLDER_RELEASE}/lib")
+set(nudb_BIN_DIRS_RELEASE )
+set(nudb_LIBRARY_TYPE_RELEASE UNKNOWN)
+set(nudb_IS_HOST_WINDOWS_RELEASE 0)
+set(nudb_LIBS_RELEASE )
+set(nudb_SYSTEM_LIBS_RELEASE )
+set(nudb_FRAMEWORK_DIRS_RELEASE )
+set(nudb_FRAMEWORKS_RELEASE )
+set(nudb_BUILD_DIRS_RELEASE )
+set(nudb_NO_SONAME_MODE_RELEASE FALSE)
+
+
+# COMPOUND VARIABLES
+set(nudb_COMPILE_OPTIONS_RELEASE
+    "$<$<COMPILE_LANGUAGE:CXX>:${nudb_COMPILE_OPTIONS_CXX_RELEASE}>"
+    "$<$<COMPILE_LANGUAGE:C>:${nudb_COMPILE_OPTIONS_C_RELEASE}>")
+set(nudb_LINKER_FLAGS_RELEASE
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>:${nudb_SHARED_LINK_FLAGS_RELEASE}>"
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,MODULE_LIBRARY>:${nudb_SHARED_LINK_FLAGS_RELEASE}>"
+    "$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${nudb_EXE_LINK_FLAGS_RELEASE}>")
+
+
+set(nudb_COMPONENTS_RELEASE nudb)
+########### COMPONENT nudb VARIABLES ############################################
+
+set(nudb_nudb_INCLUDE_DIRS_RELEASE "${nudb_PACKAGE_FOLDER_RELEASE}/include")
+set(nudb_nudb_LIB_DIRS_RELEASE "${nudb_PACKAGE_FOLDER_RELEASE}/lib")
+set(nudb_nudb_BIN_DIRS_RELEASE )
+set(nudb_nudb_LIBRARY_TYPE_RELEASE UNKNOWN)
+set(nudb_nudb_IS_HOST_WINDOWS_RELEASE 0)
+set(nudb_nudb_RES_DIRS_RELEASE )
+set(nudb_nudb_DEFINITIONS_RELEASE )
+set(nudb_nudb_OBJECTS_RELEASE )
+set(nudb_nudb_COMPILE_DEFINITIONS_RELEASE )
+set(nudb_nudb_COMPILE_OPTIONS_C_RELEASE "")
+set(nudb_nudb_COMPILE_OPTIONS_CXX_RELEASE "")
+set(nudb_nudb_LIBS_RELEASE )
+set(nudb_nudb_SYSTEM_LIBS_RELEASE )
+set(nudb_nudb_FRAMEWORK_DIRS_RELEASE )
+set(nudb_nudb_FRAMEWORKS_RELEASE )
+set(nudb_nudb_DEPENDENCIES_RELEASE Boost::thread Boost::system)
+set(nudb_nudb_SHARED_LINK_FLAGS_RELEASE )
+set(nudb_nudb_EXE_LINK_FLAGS_RELEASE )
+set(nudb_nudb_NO_SONAME_MODE_RELEASE FALSE)
+
+# COMPOUND VARIABLES
+set(nudb_nudb_LINKER_FLAGS_RELEASE
+        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,SHARED_LIBRARY>:${nudb_nudb_SHARED_LINK_FLAGS_RELEASE}>
+        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,MODULE_LIBRARY>:${nudb_nudb_SHARED_LINK_FLAGS_RELEASE}>
+        $<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:${nudb_nudb_EXE_LINK_FLAGS_RELEASE}>
+)
+set(nudb_nudb_COMPILE_OPTIONS_RELEASE
+    "$<$<COMPILE_LANGUAGE:CXX>:${nudb_nudb_COMPILE_OPTIONS_CXX_RELEASE}>"
+    "$<$<COMPILE_LANGUAGE:C>:${nudb_nudb_COMPILE_OPTIONS_C_RELEASE}>")
